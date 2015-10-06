@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+
+### git-watch --- daemon subfn for git to auto commit
+
+## Copyright (c) 2015 Zachary Elliott
+##
+## Authors: Zachary Elliott <contact@zell.io>
+## URL: https://github.com/zellio/git-watch
+## Version: 0.3.0
+
+### Commentary:
+
+##
+
+### License:
+
+## All Rights Reserved
+
+## Permission is hereby granted, free of charge, to any person obtaining a
+## copy of this software and associated documentation files (the "Software"),
+## to deal in the Software without restriction, including without limitation
+## the rights to use, copy, modify, merge, publish, distribute, sublicense,
+## and/or sell copies of the Software, and to permit persons to whom the
+## Software is furnished to do so, subject to the following conditions:
+
+## The above copyright notice and this permission notice shall be included in
+## all copies or substantial portions of the Software, and that the name of
+## NYU not be used in advertising or publicity pertaining to distribution of
+## the software without specific written permission.
+
+## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+## IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+## FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+## AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+## LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+## FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+## DEALINGS IN THE SOFTWARE.
+
+### Code:
+
+gw__basename="$(basename "$0")"
+
+function gw__usage
+{
+	cat <<EOF
+usage: git watch init                Initialize git-watch
+   or: git watch start               Start the watcher daemons
+   or: git watch stop                Stop the watcher daemons
+   or: git watch restart             Re-start the watcher daemons
+   or: git watch status              Print status about watcher daemons
+
+Specific options:
+    -c, --commit-delay PERIOD        Monitoring process update period (300)
+    -C, --check-interval PERIOD      Monitoring process update period (300)
+    -m, --message TEMPLATE           Message template (will interpolate)
+
+General options:
+        --debug                      Turn on xtrace
+    -h, --help                       Display this help message
+        --version                    Display the version number
+
+${gw__basename} home page: <https://github.com/zellio/git-watch>
+Report bugs to: <https://github.com/zellio/git-watch/issues>
+EOF
+	return 0
+}
+
+function gw__version
+{
+	cat <<EOF
+0.3.0
+EOF
+}
+
+INOTIFYWAIT="$(command -v inotifywait)"
+if [ -z "$INOTIFYWAIT" ]; then
+	echo "you need inotifywait"
+	exit 1
+fi
+
+project_dir="$(git rev-parse --show-toplevel)"
+
+(( $? )) && exit 1
+
+git_dir="$(cd "$project_dir"; git rev-parse --git-dir | xargs realpath)"
+data_dir="${git_dir}/watch"
+
+event_log="${data_dir}/event_log"
+
+gw__inotify_manager_pid_file="${data_dir}/inotify_manager.pid"
+gw__commit_manager_pid_file="${data_dir}/commit_manager.pid"
+
+function gw__utime
+{
+	date '+%s'
+}
+
+function gw__log_event
+{
+	local time
+	time="${2:-$(gw__utime)}"
+	echo "$time $1" >> "$event_log"
+	return 0
+}
+
+function gw__commit_manager
+{
+	local delay
+	local now
+	local last_event
+	local actual_duration
+
+	delay="$1"
+
+	while :; do
+		sleep "$delay"
+
+		now="$(gw__utime)"
+		last_event="$(tail -1 "$event_log" | cut -d' ' -f1)"
+		actual_duration=$(( $now - $last_event ))
+
+		if (( $actual_duration >= $commit_delay )); then
+			if [ "$(git status --porcelain | wc -l)" -ne 0 ]; then
+				git commit -a -m '' --allow-empty-message
+				gw__log_event 'GIT_WATCH_COMMIT'
+			fi
+
+			rm "$gw__commit_manager_pid_file"
+			return 0
+		fi
+
+		delay=$(( $commit_delay - $actual_duration ))
+	done
+}
+
+function gw__inotify_manager
+{
+	"$INOTIFYWAIT" \
+		--monitor \
+		--recursive \
+		--format='%e %T %w%f' \
+		--timefmt='%s' \
+		--event ATTRIB \
+		--event CLOSE_WRITE \
+		--event CREATE \
+		--event DELETE \
+		--event DELETE_SELF \
+		--event MODIFY \
+		--event MOVE_SELF \
+		--event MOVED_FROM \
+		--event MOVED_TO \
+		"$project_dir" \
+		"@$git_dir" |
+		while read inotifywait_message; do
+			IFS=' ' read raw_events time path <<< "$inotifywait_message"
+			IFS=, read -a inotify_events <<< "$raw_events"
+			for inotify_event in "${inotify_events[@]}"; do
+				gw__log_event "$inotify_event"
+				if [ ! -f "$gw__commit_manager_pid_file" ]; then
+					gw__commit_manager "$commit_delay" &
+					echo "$!" > "$gw__commit_manager_pid_file"
+				fi
+			done
+		done
+}
+
+function gw__start
+{
+	local inotify_manager_pid
+
+	if [ ! -f "$gw__inotify_manager_pid_file" ]; then
+		gw__inotify_manager &
+		inotify_manager_pid="$!"
+		echo "$inotify_manager_pid" > "$gw__inotify_manager_pid_file"
+	fi
+}
+
+function gw__stop
+{
+	if [ -f "$gw__inotify_manager_pid_file" ]; then
+		inotify_manager_pid="$(cat "$gw__inotify_manager_pid_file")"
+		pkill -TERM -P "$inotify_manager_pid" && kill -TERM "$inotify_manager_pid"
+		(( ! $? )) && rm "$gw__inotify_manager_pid_file"
+	fi
+
+	if [ -f "$gw__commit_manager_pid_file" ]; then
+		commit_manager_pid="$(cat "$gw__commit_manager_pid_file")"
+		pkill -TERM -P "$commit_manager_pid" && kill -TERM "$commit_manager_pid"
+		(( ! $? )) && rm "$gw__commit_manager_pid_file"
+	fi
+}
+
+function gw__restart
+{
+	gw__stop
+	sleep 1
+	gw__start
+}
+
+function gw__status
+{
+	if [ -f "$gw__inotify_manager_pid_file" ]; then
+		echo "inotify_manager running with pid $(cat "$gw__inotify_manager_pid_file")"
+	else
+		echo "inotify_manager is not running"
+	fi
+
+	if [ -f "$gw__commit_manager_pid_file" ]; then
+		echo "commit_manager running with pid $(cat "$gw__commit_manager_pid_file")"
+	else
+		echo "commit_manager is not running"
+	fi
+}
+
+function gw__init
+{
+	if [ -d "$data_dir" ] && [ "$1" != "force" ]; then
+		return 0
+	fi
+
+	mkdir -p "$data_dir"
+
+	echo "$(gw__utime) GIT_WATCH_INIT" > "$event_log"
+
+	return 0
+}
+
+function gw__main
+{
+	gw__init
+
+	ARGS=$(getopt \
+			   --longoptions 'commit-delay:,message:,debug,help,version' \
+			   --name "$gw__basename" \
+			   --options 'c:m:h' \
+			   -- "$@");
+
+	if (( $? )); then
+		gw__usage
+		return 1
+	fi
+
+	eval set -- "$ARGS"
+
+	local subfn=
+	local commit_delay=300
+	local check_interval=30
+	local message=
+
+	while :; do
+		case "$1" in
+			-c|--commit-delay)
+				commit_delay="$2"
+				shift 2
+				;;
+			-C|--check-interval)
+				check_interval="$2"
+				shift 2
+				;;
+			-m|--message)
+				message="$2"
+				shift 2
+				;;
+
+			--debug)
+				set -x
+				shift 1
+				;;
+			-h|--help)
+				gw__usage
+				return 0
+				;;
+			--version)
+				gw__version
+				return 0
+				;;
+
+			--)
+				subfn="$2"
+				shift 2
+				break
+				;;
+		esac
+	done
+
+	case "$subfn" in
+		init|start|stop|restart|status)
+			"gw__${subfn}"
+
+			return "$?"
+		;;
+		*)
+			gw__usage
+			return 1
+			;;
+	esac
+}
+
+gw__main "$@"
+
+exit "$?"
+
+### end of git-watch
