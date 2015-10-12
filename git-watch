@@ -203,7 +203,7 @@ function gw__status
 {
 	echo -n "[ inotify_manager "
 	if [ -f "$gw__inotify_manager_pid_file" ]; then
-		if pgrep -F "$gw__inotify_manager_pid_file"; then
+		if pgrep -F "$gw__inotify_manager_pid_file" >/dev/null 2>&1; then
 			echo -n "running :: $(<"$gw__inotify_manager_pid_file")"
 		else
 			echo -n "error :: stale pid file"
@@ -215,7 +215,7 @@ function gw__status
 
 	echo -n "[ commit_manager "
 	if [ -f "$gw__commit_manager_pid_file" ]; then
-		if pgrep -F "$gw__commit_manager_pid_file"; then
+		if pgrep -F "$gw__commit_manager_pid_file" >/dev/null 2>&1; then
 			echo -n "running :: $(<"$gw__commit_manager_pid_file")"
 		else
 			echo -n "error :: stale pid file"
@@ -242,12 +242,12 @@ function gw__init
 function gw__cleanup
 {
 	if [ -f "$gw__inotify_manager_pid_file" ] &&
-		   ! pgrep -F "$gw__inotify_manager_pid_file"; then
+		   ! pgrep -F "$gw__inotify_manager_pid_file" >/dev/null 2>&1; then
 		rm "$gw__inotify_manager_pid_file"
 	fi
 
 	if [ -f "$gw__commit_manager_pid_file" ] &&
-		   ! pgrep -F "$gw__commit_manager_pid_file"; then
+		   ! pgrep -F "$gw__commit_manager_pid_file" >/dev/null 2>&1; then
 		rm "$gw__commit_manager_pid_file"
 	fi
 }
