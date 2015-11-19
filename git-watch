@@ -88,15 +88,7 @@ function gw__version
 EOF
 }
 
-INOTIFYWAIT="$(command -v inotifywait)"
-if [ -z "$INOTIFYWAIT" ]; then
-	echo "you need inotifywait"
-	exit 1
-fi
-
 project_dir="$(git rev-parse --show-toplevel)"
-
-(( $? )) && exit 1
 
 git_dir="$(cd "$project_dir"; git rev-parse --git-dir | xargs realpath)"
 data_dir="${git_dir}/watch"
@@ -152,7 +144,7 @@ function gw__commit_manager
 
 function gw__inotify_manager
 {
-	"$INOTIFYWAIT" \
+	inotifywait \
 		--monitor \
 		--recursive \
 		--format='%e %T %w%f' \
