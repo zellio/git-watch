@@ -134,7 +134,7 @@ function gw__commit_manager
 		if (( actual_duration >= commit_delay )); then
 			if [ "$(git status --porcelain | wc -l)" -ne 0 ]; then
 				git add --all
-				git commit -m '' --allow-empty-message
+				git commit --message '' --allow-empty-message >/dev/null 2>&1
 				gw__log_event 'GIT_WATCH_COMMIT'
 			fi
 
