@@ -92,6 +92,8 @@ EOF
 
 project_dir="$(git rev-parse --show-toplevel)"
 
+(( $? )) && exit 1
+
 git_dir="$(cd "$project_dir"; git rev-parse --git-dir | xargs realpath)"
 data_dir="${git_dir}/watch"
 
@@ -182,27 +184,50 @@ function gw__inotify_manager
 	return "$?"
 }
 
+function __is_running
+{
+	local pid_file="gw__${1}_pid_file"
+	pid_file="${!pid_file}"
+	test -r "$pid_file" && pgrep -F "$pid_file" >/dev/null 2>&1
+}
+
+function __running_dirty
+{
+	local pid_file="gw__${1}_pid_file"
+	pid_file="${!pid_file}"
+	test -r "$pid_file" && ! pgrep -F "$pid_file" >/dev/null 2>&1
+}
+
+function gw__cleanup
+{
+	if __running_dirty inotify_manager; then
+		rm "$gw__inotify_manager_pid_file"
+	fi
+
+	if __running_dirty commit_manager; then
+		rm "$gw__commit_manager_pid_file"
+	fi
+}
+
+
 function gw__start
 {
-	local inotify_manager_pid
-
-	if [ ! -f "$gw__inotify_manager_pid_file" ]; then
+	if ! __is_running inotify_manager; then
 		gw__inotify_manager &
-		inotify_manager_pid="$!"
-		echo "$inotify_manager_pid" > "$gw__inotify_manager_pid_file"
+		echo "$!" >"$gw__inotify_manager_pid_file"
 	fi
 }
 
 function gw__stop
 {
-	if [ -f "$gw__inotify_manager_pid_file" ]; then
-		inotify_manager_pid="$(<"$gw__inotify_manager_pid_file")"
+	if __is_running inotify_manager; then
+		local inotify_manager_pid="$(<"$gw__inotify_manager_pid_file")"
 		pkill -TERM -P "$inotify_manager_pid" && kill -TERM "$inotify_manager_pid"
 		(( ! $? )) && rm "$gw__inotify_manager_pid_file"
 	fi
 
-	if [ -f "$gw__commit_manager_pid_file" ]; then
-		commit_manager_pid="$(<"$gw__commit_manager_pid_file")"
+	if __is_running commit_manager; then
+		local commit_manager_pid="$(<"$gw__commit_manager_pid_file")"
 		pkill -TERM -P "$commit_manager_pid" && kill -TERM "$commit_manager_pid"
 		(( ! $? )) && rm "$gw__commit_manager_pid_file"
 	fi
@@ -218,7 +243,7 @@ function gw__restart
 function gw__status
 {
 	echo -n "[ inotify_manager "
-	if [ -f "$gw__inotify_manager_pid_file" ]; then
+	if [ -r "$gw__inotify_manager_pid_file" ]; then
 		if pgrep -F "$gw__inotify_manager_pid_file" >/dev/null 2>&1; then
 			echo -n "running :: $(<"$gw__inotify_manager_pid_file")"
 		else
@@ -230,7 +255,7 @@ function gw__status
 	echo "]"
 
 	echo -n "[ commit_manager "
-	if [ -f "$gw__commit_manager_pid_file" ]; then
+	if [ -r "$gw__commit_manager_pid_file" ]; then
 		if pgrep -F "$gw__commit_manager_pid_file" >/dev/null 2>&1; then
 			echo -n "running :: $(<"$gw__commit_manager_pid_file")"
 		else
@@ -250,22 +275,9 @@ function gw__init
 
 	mkdir -p "$data_dir"
 
-	echo "$(gw__utime) GIT_WATCH_INIT" > "$event_log"
+	gw__log_event 'GIT_WATCH_INIT'
 
 	return 0
-}
-
-function gw__cleanup
-{
-	if [ -f "$gw__inotify_manager_pid_file" ] &&
-		   ! pgrep -F "$gw__inotify_manager_pid_file" >/dev/null 2>&1; then
-		rm "$gw__inotify_manager_pid_file"
-	fi
-
-	if [ -f "$gw__commit_manager_pid_file" ] &&
-		   ! pgrep -F "$gw__commit_manager_pid_file" >/dev/null 2>&1; then
-		rm "$gw__commit_manager_pid_file"
-	fi
 }
 
 function gw__main
