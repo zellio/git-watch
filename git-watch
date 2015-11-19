@@ -166,14 +166,15 @@ function gw__inotify_manager
 		--event MOVED_TO \
 		"$project_dir" \
 		"@$git_dir" |
-		while read inotifywait_message; do
-			IFS=' ' read raw_events time path <<< "$inotifywait_message"
-			IFS=, read -a inotify_events <<< "$raw_events"
+		while IFS= read inotifywait_message; do
+			IFS=' ' read raw_events time path <<<"$inotifywait_message"
+			IFS=',' read -r -a inotify_events <<<"$raw_events"
+
 			for inotify_event in "${inotify_events[@]}"; do
 				gw__log_event "$inotify_event"
-				if [ ! -f "$gw__commit_manager_pid_file" ]; then
+				if [ ! -r "$gw__commit_manager_pid_file" ]; then
 					gw__commit_manager "$commit_delay" &
-					echo "$!" > "$gw__commit_manager_pid_file"
+					echo "$!" >"$gw__commit_manager_pid_file"
 				fi
 			done
 		done
