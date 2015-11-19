@@ -128,9 +128,10 @@ function gw__commit_manager
 
 		now="$(gw__utime)"
 		last_event="$(tail -1 "$event_log" | cut -d' ' -f1)"
-		actual_duration=$(( $now - $last_event ))
 
-		if (( $actual_duration >= $commit_delay )); then
+		(( actual_duration = now - last_event ))
+
+		if (( actual_duration >= commit_delay )); then
 			if [ "$(git status --porcelain | wc -l)" -ne 0 ]; then
 				git add --all
 				git commit -m '' --allow-empty-message
@@ -141,7 +142,7 @@ function gw__commit_manager
 			return 0
 		fi
 
-		delay=$(( $commit_delay - $actual_duration ))
+		(( delay = commit_delay - actual_duration ))
 	done
 
 	return 1
