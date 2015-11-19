@@ -39,6 +39,7 @@
 function error
 {
 	echo -e "\e[1;31m>>> ERROR: $@\e[0m"
+	return 1
 }
 
 function requires
@@ -86,6 +87,7 @@ function gw__version
 	cat <<EOF
 0.3.0
 EOF
+	return 0
 }
 
 project_dir="$(git rev-parse --show-toplevel)"
@@ -101,6 +103,7 @@ gw__commit_manager_pid_file="${data_dir}/commit_manager.pid"
 function gw__utime
 {
 	date '+%s'
+	return 0
 }
 
 function gw__log_event
@@ -140,6 +143,8 @@ function gw__commit_manager
 
 		delay=$(( $commit_delay - $actual_duration ))
 	done
+
+	return 1
 }
 
 function gw__inotify_manager
@@ -171,6 +176,8 @@ function gw__inotify_manager
 				fi
 			done
 		done
+
+	return "$?"
 }
 
 function gw__start
